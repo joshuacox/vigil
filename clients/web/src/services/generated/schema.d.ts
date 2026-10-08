@@ -6011,6 +6011,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/skills/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Skill
+         * @description Install an uploaded ``SKILL.md`` or ``.zip`` under the operator root.
+         *
+         *     Declared ahead of the ``/{name}`` routes so it is never read as a skill
+         *     named "upload". A taken name is refused (409); nothing overwrites.
+         *     Only the capped read below reaches the installer.
+         */
+        post: operations["post_api_skills_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/skills/{name}": {
         parameters: {
             query?: never;
@@ -8595,6 +8619,11 @@ export interface components {
             file: string;
             /** Format */
             format?: string | null;
+        };
+        /** Body_upload_skill_api_skills_upload_post */
+        Body_upload_skill_api_skills_upload_post: {
+            /** File */
+            file: string;
         };
         /**
          * BootstrapRequest
@@ -23086,6 +23115,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SkillWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_api_skills_upload: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_skill_api_skills_upload_post"];
             };
         };
         responses: {

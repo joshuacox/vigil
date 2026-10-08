@@ -13,6 +13,7 @@ import WorkflowBuilder from './WorkflowBuilder'
 import WorkflowReaderPane from './WorkflowReaderPane'
 import { AgentDrawer } from './AgentDrawer'
 import { SkillDeleteModal, SkillDrawer } from './SkillDrawer'
+import { skillsApi } from '../../services/skillsApi'
 import type { ConsoleScreenProps } from '../../shared/types'
 import { Cost } from '../../shared/cost'
 import { COMMANDS, LIVE_COMMANDS } from '../../shell/commandBarModel'
@@ -3013,6 +3014,18 @@ function SkillsTab({ feed, workflows, agents }: { feed: Feed<Skill>; workflows: 
   const [editName, setEditName] = useState<string | null>(null)
   const [building, setBuilding] = useState(false)
   const [deleteSkill, setDeleteSkill] = useState<Skill | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const uploadInput = useRef<HTMLInputElement>(null)
+
+  const upload = (file: File) => {
+    setUploading(true)
+    setUploadError(null)
+    skillsApi
+      .upload(file)
+      .then((saved) => { setUploading(false); reload(); setEditName(saved.name) })
+      .catch((e) => { setUploadError(errMsg(e)); setUploading(false) })
+  }
   const offered = workflows.phase === 'ready' && agents.phase === 'ready'
     ? workflowsOffered(workflows.rows, agents.grants)
     : null
@@ -3031,8 +3044,18 @@ function SkillsTab({ feed, workflows, agents }: { feed: Feed<Skill>; workflows: 
             <span className="sk-offered-list">{offeredText}</span>
           </span>
         </div>
+        <input
+          ref={uploadInput}
+          type="file"
+          accept=".md,.zip"
+          className="hidden"
+          aria-label="Upload a SKILL.md or zip"
+          onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) upload(file) }}
+        />
+        <button className="btn ghost h-[34px] rounded-[10px] font-semibold" disabled={phase !== 'ready' || uploading} style={{ opacity: phase === 'ready' && !uploading ? 1 : 0.5 }} onClick={() => uploadInput.current?.click()}><Icon name="upload" /> {uploading ? 'Importing…' : 'Import SKILL.md or zip'}</button>
         <button className="btn primary h-[34px] rounded-[10px] font-semibold" disabled={phase !== 'ready'} style={{ opacity: phase === 'ready' ? 1 : 0.5 }} onClick={() => setBuilding(true)}><Icon name="sparkle" /> Build a skill</button>
       </div>
+      {uploadError && <div className="px-[22px] pt-2 text-[12.5px]" style={{ color: 'var(--crit)' }}>{uploadError}</div>}
       {phase === 'loading' && <StateMsg><EmptyState loading compact icon="sparkle" title="Loading skills…" /></StateMsg>}
       {phase === 'error' && <StateMsg><EmptyState error icon="alert" title="Couldn’t load skills" body={error} primary={{ label: 'Retry', onClick: reload, icon: 'refresh' }} /></StateMsg>}
       {phase === 'ready' && rows.length === 0 && <StateMsg><EmptyState icon="sparkle" title="No skills found" body="Add skill files to the repository or the mounted skills directory and refresh." primary={{ label: 'Refresh', onClick: reload, icon: 'refresh' }} /></StateMsg>}

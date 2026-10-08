@@ -31,7 +31,7 @@ Section 12 kept today's graph builder and deferred the board's loop to phase 2. 
 
 **Tabs:** Workflows, Agents, Skills, Commands, each with its count.
 
-**Later:** editing a workflow's stages; per-agent skill assignment; editing a skill's scripts; skill import; viewing or restoring an earlier version; "Describe a change and Vigil drafts it"; custom commands.
+**Later:** editing a workflow's stages; per-agent skill assignment; editing a skill's scripts; viewing or restoring an earlier version; "Describe a change and Vigil drafts it"; custom commands.
 
 **Omitted:** Tool permissions; per-tool autonomy settings; authorship.
 
@@ -80,6 +80,7 @@ Section 12 kept today's graph builder and deferred the board's loop to phase 2. 
   - Only the steps file is editable; other files open read-only.
   - Test with a sample runs the skill's own test cases and shows pass or fail per case; a skill with none says so.
   - A skill of one's own can be deleted, with press-and-hold.
+- **AW-S3. Skill import.** A SKILL.md, or a zip of a skill folder, can be uploaded from the Skills tab; it is validated with the loader's rules and installed under the operator root, and a taken name is refused.
 
 ### Commands tab
 
@@ -110,4 +111,4 @@ On top of `PRD-phase1.md` section 14, this document is done when:
 
 ## 6. Phase 2 map
 
-Editing a workflow's stages. Per-agent skill assignment and per-skill usage. Editing a skill's scripts, and skill import. Version history with restore. Custom and role-gated commands. Tool permissions. Trust, tier and agreement as measured values. Adding helpers to single-agent workflows, if they should have them.
+Editing a workflow's stages. Per-agent skill assignment and per-skill usage. Editing a skill's scripts. Version history with restore. Custom and role-gated commands. Tool permissions. Trust, tier and agreement as measured values. Adding helpers to single-agent workflows, if they should have them.

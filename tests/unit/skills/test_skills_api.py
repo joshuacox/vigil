@@ -7,6 +7,9 @@ prompt built afterwards reads the file that was just written.
 
 from __future__ import annotations
 
+import io
+import stat
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -16,7 +19,11 @@ from fastapi.testclient import TestClient
 
 from core.agents.prompts import render_base_prompt
 from core.config import Settings
-from core.skills.skill_library import LIBRARY_ROOT, parse_skill
+from core.skills.skill_library import (
+    LIBRARY_ROOT,
+    SKILL_UPLOAD_MAX_BYTES,
+    parse_skill,
+)
 from services.api.routers import skills as skills_router
 
 pytestmark = pytest.mark.unit
@@ -449,3 +456,175 @@ def test_a_copy_leaves_hidden_files_behind_and_lists_what_it_copied(
         ["SKILL.md", "evals", "cases.json"]
     )
     assert [p.name for p in root.iterdir()] == ["wip-copy"]
+
+
+UPLOADED_MD = (
+    "---\nname: uploaded-skill\ndescription: Brought in from a file.\n"
+    "license: MIT\nmetadata:\n  origin: test\n---\n\n# Uploaded\n\nSteps.\n"
+)
+
+
+def _zip_bytes(entries: dict[str, bytes | str]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        for name, data in entries.items():
+            archive.writestr(name, data)
+    return buf.getvalue()
+
+
+def _upload(client: TestClient, filename: str, data: bytes):
+    return client.post(
+        "/api/skills/upload",
+        files={"file": (filename, data, "application/octet-stream")},
+    )
+
+
+def test_upload_bare_skill_md_installs_under_the_frontmatter_name(operator):
+    client, root = operator
+    resp = _upload(client, "SKILL.md", UPLOADED_MD.encode())
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "uploaded-skill"
+    assert resp.json()["bundled"] is False
+    assert resp.json()["file_count"] == 1
+    skill = parse_skill(root / "uploaded-skill")
+    assert skill.description == "Brought in from a file."
+    # frontmatter the drawer would drop survives an upload
+    assert _frontmatter(root / "uploaded-skill" / "SKILL.md")["license"] == "MIT"
+    detail = client.get("/api/skills/uploaded-skill")
+    assert detail.status_code == 200
+    assert detail.json()["body"].startswith("# Uploaded")
+
+
+def test_upload_zip_at_root_keeps_its_references(operator):
+    client, root = operator
+    data = _zip_bytes({"SKILL.md": UPLOADED_MD, "references/guide.md": "# Guide\n"})
+    resp = _upload(client, "uploaded-skill.zip", data)
+    assert resp.status_code == 200
+    assert resp.json()["file_count"] == 2
+    assert (root / "uploaded-skill" / "references" / "guide.md").is_file()
+    read = client.get("/api/skills/uploaded-skill/files/references/guide.md")
+    assert read.status_code == 200 and "# Guide" in read.json()["content"]
+
+
+def test_upload_zip_in_a_single_top_folder_strips_the_folder(operator):
+    client, root = operator
+    data = _zip_bytes(
+        {
+            "uploaded-skill/SKILL.md": UPLOADED_MD,
+            "uploaded-skill/scripts/run.py": "print(1)\n",
+            "__MACOSX/uploaded-skill/._SKILL.md": "junk",
+            "uploaded-skill/.hidden": "junk",
+        }
+    )
+    resp = _upload(client, "uploaded-skill.zip", data)
+    assert resp.status_code == 200
+    assert resp.json()["file_count"] == 2
+    assert (root / "uploaded-skill" / "scripts" / "run.py").is_file()
+    assert not (root / "uploaded-skill" / ".hidden").exists()
+
+
+@pytest.mark.parametrize(
+    "content,detail",
+    [
+        (
+            "---\nname: Bad_Name\ndescription: d\n---\n\nBody\n",
+            "`name` 'Bad_Name' must be lowercase letters",
+        ),
+        (
+            "---\nname: no-desc\n---\n\nBody\n",
+            "`description` must be a non-empty string",
+        ),
+        ("# No frontmatter\n", "missing YAML frontmatter"),
+        (
+            "---\nname: bad-meta\ndescription: d\nmetadata:\n  version: 1\n---\n\nB\n",
+            "`metadata` must be a map of string to string",
+        ),
+    ],
+)
+def test_upload_bare_skill_md_surfaces_the_loader_reason(operator, content, detail):
+    client, root = operator
+    resp = _upload(client, "SKILL.md", content.encode())
+    assert resp.status_code == 400
+    assert detail in resp.json()["detail"]
+    assert list(root.iterdir()) == []
+
+
+def test_upload_zip_name_must_match_its_folder(operator):
+    client, root = operator
+    data = _zip_bytes({"other-name/SKILL.md": UPLOADED_MD})
+    resp = _upload(client, "skill.zip", data)
+    assert resp.status_code == 400
+    assert "does not match directory" in resp.json()["detail"]
+    assert list(root.iterdir()) == []
+
+
+def test_upload_refuses_bundled_and_existing_names_with_409(operator):
+    client, root = operator
+    bundled = UPLOADED_MD.replace("uploaded-skill", BUNDLED)
+    resp = _upload(client, "SKILL.md", bundled.encode())
+    assert resp.status_code == 409
+    assert "bundled" in resp.json()["detail"]
+    assert _upload(client, "SKILL.md", UPLOADED_MD.encode()).status_code == 200
+    again = _upload(client, "SKILL.md", UPLOADED_MD.encode())
+    assert again.status_code == 409
+    assert "delete the existing one first" in again.json()["detail"]
+    assert [p.name for p in root.iterdir()] == ["uploaded-skill"]
+
+
+def test_upload_zip_rejects_escapes_symlinks_and_non_zips(operator):
+    client, root = operator
+    escape = _zip_bytes({"SKILL.md": UPLOADED_MD, "../x.txt": "x"})
+    assert _upload(client, "s.zip", escape).status_code == 400
+    absolute = _zip_bytes({"/tmp/x.txt": "x", "SKILL.md": UPLOADED_MD})
+    assert _upload(client, "s.zip", absolute).status_code == 400
+    backslash = _zip_bytes({"..\\x.txt": "x", "SKILL.md": UPLOADED_MD})
+    assert _upload(client, "s.zip", backslash).status_code == 400
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as archive:
+        archive.writestr("SKILL.md", UPLOADED_MD)
+        link = zipfile.ZipInfo("uploaded-skill-link")
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        archive.writestr(link, "target")
+    resp = _upload(client, "s.zip", buf.getvalue())
+    assert resp.status_code == 400
+    assert "symlink" in resp.json()["detail"]
+
+    not_zip = _upload(client, "s.zip", b"this is not a zip")
+    assert not_zip.status_code == 400
+    assert "not a zip" in not_zip.json()["detail"]
+    assert list(root.iterdir()) == []
+
+
+def test_upload_zip_caps_file_count_and_uncompressed_size(operator):
+    client, root = operator
+    many = {"SKILL.md": UPLOADED_MD}
+    many.update({f"references/f{i}.md": "x" for i in range(200)})
+    resp = _upload(client, "s.zip", _zip_bytes(many))
+    assert resp.status_code == 400
+    assert "at most" in resp.json()["detail"]
+    big = _zip_bytes(
+        {"SKILL.md": UPLOADED_MD, "big.txt": b"x" * (SKILL_UPLOAD_MAX_BYTES + 1)}
+    )
+    resp = _upload(client, "s.zip", big)
+    assert resp.status_code == 400
+    assert "larger than" in resp.json()["detail"]
+    assert list(root.iterdir()) == []
+
+
+def test_upload_rejects_other_extensions_and_an_unset_root(
+    operator, tmp_path, monkeypatch
+):
+    client, root = operator
+    resp = _upload(client, "skill.txt", UPLOADED_MD.encode())
+    assert resp.status_code == 400
+    assert list(root.iterdir()) == []
+
+    monkeypatch.setattr(
+        "core.skills.skill_library.get_settings",
+        lambda: Settings(vigil_skills_path=""),
+    )
+    resp = _upload(_app(), "SKILL.md", UPLOADED_MD.encode())
+    assert resp.status_code == 400
+    assert "unset" in resp.json()["detail"]

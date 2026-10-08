@@ -181,6 +181,13 @@ vi.mock('../../services/skillsApi', () => ({
       bundled: false,
       file_count: 2,
     })),
+    upload: vi.fn(() => Promise.resolve({
+      name: 'uploaded-skill',
+      description: 'Brought in from a file.',
+      source_path: 'skills/uploaded-skill',
+      bundled: false,
+      file_count: 2,
+    })),
     delete: vi.fn(() => Promise.resolve({ deleted: 'desk-check' })),
   },
 }))
@@ -435,6 +442,39 @@ describe('workflow catalog cards', () => {
     fireEvent.change(name, { target: { value: 'new-skill' } })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
     expect(skillsApi.save).toHaveBeenCalledWith({ name: 'new-skill', description: 'Does a thing.', body: '' })
+  })
+
+  it('imports an uploaded skill and opens its drawer', async () => {
+    render(
+      <MemoryRouter>
+        <WorkflowsScreen openChat={vi.fn()} go={vi.fn()} goSettings={vi.fn()} openCase={vi.fn()} setViewFull={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Skills' }))
+    await screen.findByText('executive-summary')
+    const file = new File(['---\nname: uploaded-skill\n---\n'], 'SKILL.md', { type: 'text/markdown' })
+    fireEvent.change(screen.getByLabelText('Upload a SKILL.md or zip'), { target: { files: [file] } })
+    expect(skillsApi.upload).toHaveBeenCalledWith(file)
+    expect(await screen.findByRole('dialog', { name: 'Edit uploaded-skill' })).toBeInTheDocument()
+  })
+
+  it("shows the server's reason when an upload is refused", async () => {
+    vi.mocked(skillsApi.upload).mockRejectedValueOnce({
+      response: { data: { detail: "`name` 'Bad_Name' must be lowercase letters, digits and single hyphens" } },
+    })
+    render(
+      <MemoryRouter>
+        <WorkflowsScreen openChat={vi.fn()} go={vi.fn()} goSettings={vi.fn()} openCase={vi.fn()} setViewFull={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Skills' }))
+    await screen.findByText('executive-summary')
+    const file = new File(['---\nname: Bad_Name\n---\n'], 'SKILL.md', { type: 'text/markdown' })
+    fireEvent.change(screen.getByLabelText('Upload a SKILL.md or zip'), { target: { files: [file] } })
+    expect(await screen.findByText(/'Bad_Name' must be lowercase/)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
   it('shows the reader pane beside the cards and follows the selected card', async () => {
