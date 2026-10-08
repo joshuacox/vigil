@@ -9,6 +9,27 @@ import { Icon } from '../../shared/icons'
 import { VigilLogo } from '../../shared/VigilLogo'
 import { useColorScheme } from '../../contexts/ColorSchemeContext'
 
+const UNREACHABLE_MESSAGE = "Can't reach the Vigil API. Is the backend running?"
+
+const CREDENTIALS_MESSAGE = 'Sign in failed. Check your credentials.'
+
+// The unreachable message when the API never really answered, the server's
+// detail when it sent one, or null when the caller should use its own
+// fallback. A network error has no response at all; a proxy 5xx (Vite
+// answers ECONNREFUSED with a 500) has no string detail — neither says
+// anything about the credentials, so neither may blame them.
+function unreachableOrDetail(err: any): string | null {
+  const status = err?.response?.status
+  const detail = err?.response?.data?.detail
+  const hasDetail = typeof detail === 'string' && detail.length > 0
+  if (!err?.response) return UNREACHABLE_MESSAGE
+  if (typeof status === 'number' && status >= 500 && status < 600 && !hasDetail) {
+    return UNREACHABLE_MESSAGE
+  }
+  if (hasDetail) return detail
+  return null
+}
+
 export default function LoginScreen() {
   const navigate = useNavigate()
   const { login } = useAuth()
@@ -51,7 +72,7 @@ export default function LoginScreen() {
       await login(usernameOrEmail, password)
       navigate('/dashboard')
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Could not create your account.')
+      setError(unreachableOrDetail(err) ?? 'Could not create your account.')
     } finally {
       setLoading(false)
     }
@@ -70,7 +91,12 @@ export default function LoginScreen() {
         setMfaCode('')
         setError('Enter your 2FA code to continue.')
       } else {
-        setError(err?.response?.data?.detail || 'Sign in failed. Check your credentials.')
+        setError(
+          unreachableOrDetail(err) ??
+            (err?.response?.status === 401
+              ? CREDENTIALS_MESSAGE
+              : 'Sign in failed. Please try again.'),
+        )
       }
     } finally {
       setLoading(false)

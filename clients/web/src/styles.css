@@ -6353,6 +6353,56 @@
    color: var(--tx-3);
 }
 
+/* Backend-unreachable state — reuses the Loader layout above, with the
+   console's type and accent tokens for the message and retry. */
+.soc-unreachable-inner {
+   gap: 14px;
+   max-width: 420px;
+   padding: 24px;
+   text-align: center;
+}
+
+.soc-unreachable .soc-loader-mark {
+   animation: none;
+}
+
+.soc-unreachable-title {
+   margin: 8px 0 0;
+   font-size: 20px;
+   font-weight: 600;
+   color: var(--tx);
+}
+
+.soc-unreachable-message {
+   margin: 0;
+   font-size: 13.5px;
+   line-height: 1.5;
+   color: var(--tx-3);
+}
+
+.soc-unreachable-retry {
+   margin-top: 8px;
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   min-height: 40px;
+   padding: 10px 22px;
+   font-family: inherit;
+   font-size: 14px;
+   font-weight: 600;
+   color: var(--ac-tx);
+   background: var(--accent);
+   border: 1px solid var(--accent);
+   border-radius: var(--r);
+   cursor: pointer;
+   transition: all .14s;
+}
+
+.soc-unreachable-retry:hover {
+   background: var(--accent-2);
+   border-color: var(--accent-2);
+}
+
 @keyframes soc-loader-pulse {
    0%, 100% {
       opacity: .55;
