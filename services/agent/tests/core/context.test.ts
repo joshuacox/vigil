@@ -3,6 +3,7 @@ import {
   assemble,
   canonical,
   DEFAULT_FOLD,
+  derivedCeiling,
   foldHistory,
   prefixBytes,
   prefixMessages,
@@ -357,5 +358,50 @@ describe("the current question is never folded away", () => {
     expect(() => assemble(prefixOf("s", [], []), "Q1", held, "", note, policy)).toThrow(/more than Ask can read at once/);
     // The same weight as the task does not throw: a task keeps today's behaviour.
     expect(() => assemble(prefixOf("s", [], []), "q".repeat(5_000), [], "", note, policy)).not.toThrow();
+  });
+});
+
+describe("the ceiling a window derives", () => {
+  it("sizes the window less the reply reserve at the conservative density", () => {
+    expect(derivedCeiling(16_384)).toBe(33_177);
+    expect(derivedCeiling(32_768)).toBe(77_414);
+  });
+
+  it("derives above the flat ceiling for a wide window, where the smaller of the two governs", () => {
+    expect(derivedCeiling(200_000)).toBeGreaterThan(DEFAULT_FOLD.max_chars);
+  });
+
+  it("never derives below zero for a window smaller than the reserve", () => {
+    expect(derivedCeiling(2_048)).toBe(0);
+  });
+});
+
+// A tighter fold budget is a budget for history, not a new refusal line: the
+// question is still refused only when it leaves no room beside the prefix
+// under the policy's ceiling, exactly as before the budget existed.
+describe("a tighter fold budget than the refusal ceiling", () => {
+  const held: Message[] = [
+    { role: "assistant", content: "a".repeat(30_000), tool_calls: [] },
+    { role: "user", content: "an earlier question" },
+    { role: "assistant", content: "b".repeat(30_000), tool_calls: [] },
+    { role: "user", content: "what happened next?" },
+  ];
+
+  it("folds history toward the tighter budget and still answers the question", () => {
+    const prefix = prefixOf("s".repeat(1_000), [], []);
+    const policy: FoldPolicy = { ...DEFAULT_FOLD, fold_max_chars: 10_000 };
+    const { messages, folded } = assemble(prefix, "Q1", held, "", SUMMARY, policy);
+
+    expect(folded).toBeGreaterThan(0);
+    expect(sizeOf(messages)).toBeLessThan(45_000);
+    expect(messages.some((one) => one.content.includes("what happened next?"))).toBe(true);
+  });
+
+  it("leaves the same history whole under the flat ceiling alone", () => {
+    const prefix = prefixOf("s".repeat(1_000), [], []);
+    const { messages, folded } = assemble(prefix, "Q1", held, "", SUMMARY, DEFAULT_FOLD);
+
+    expect(folded).toBe(0);
+    expect(sizeOf(messages)).toBeGreaterThan(60_000);
   });
 });

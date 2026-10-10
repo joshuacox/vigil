@@ -26,7 +26,7 @@ from core.llm.chat_layers import (
     run_id_for,
 )
 from core.llm.defaults import DEFAULT_MODEL
-from core.llm.providers.registry import get_registry, is_chat_model
+from core.llm.providers.registry import ModelRegistry, get_registry, is_chat_model
 from core.llm.router.router import get_provider_spec
 from core.llm.system_prompt import validate_system_prompt
 from core.llm.target import (
@@ -234,6 +234,27 @@ def _servable_agent_model(
     return chosen
 
 
+def _context_window_for(
+    provider_id: Optional[str], provider_type: str, model: str
+) -> Optional[int]:
+    """The resolved model's context window, from the gateway catalogue.
+
+    None when the catalogue does not know the model — it reports 0 — or the
+    lookup fails: the config then carries no window and the agent layer
+    folds against its flat ceiling, which is today's behaviour. Chat is the
+    caller that resolved the model, so it is the side that can say.
+    """
+    try:
+        info = ModelRegistry.get_model_info(provider_id or "", provider_type, model)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug(
+            "context window lookup failed for %s/%s: %s", provider_type, model, exc
+        )
+        return None
+    window = getattr(info, "context_window", None)
+    return window if isinstance(window, int) and window > 0 else None
+
+
 class ContentBlock(BaseModel):
     """Content block for message (text or image)."""
 
@@ -368,6 +389,10 @@ async def chat_stream(
         _raise_no_provider()
     model = request.model = model_for(active_provider, request.model)
     provider_type = active_provider.provider_type
+    # The window of the model this turn actually resolved to, so the agent
+    # layer can fold a small-window model against its own window rather than
+    # a flat ceiling sized for the largest. Unknown renders no key.
+    context_window = _context_window_for(provider_id, provider_type, model)
 
     # Whatever MCP integrations are connected right now (VirusTotal, OTX, MISP,
     # Shodan, …), refreshed per turn, no restart. Named in the prompt rather than
@@ -391,6 +416,7 @@ async def chat_stream(
             mcp_tools,
             provider=provider_type,
             effort=resolve_effort("chat_default"),
+            context_window=context_window,
         ),
         # So the tools this turn calls record the person driving it, the same
         # name the /mcp door binds. Signed here; the agent layer only carries it.

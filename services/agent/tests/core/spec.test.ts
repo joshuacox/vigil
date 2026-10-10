@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { archFor, isHuntLike, registeredKinds } from "../../arch/registry.js";
-import { buildSpec, SpecError, type SpecPaths } from "../../core/spec.js";
+import { buildSpec, parseConfig, SpecError, type SpecPaths } from "../../core/spec.js";
 
 const FIXTURES = join(import.meta.dirname, "..", "fixtures");
 const scratch = mkdtempSync(join(tmpdir(), "vigil-arch-"));
@@ -273,5 +273,19 @@ describe("the config layer", () => {
   it("refuses a config that names no model", () => {
     const config = scratchFile("no-model.yaml", "budgets: { max_calls: 2 }\n");
     expect(() => buildSpec({ ...CASE, config }, ["EXAMINE", "CONCLUDE"])).toThrow(/config needs a model/);
+  });
+});
+
+describe("the config's context window", () => {
+  it("carries the window when the config declares one", () => {
+    expect(parseConfig("model: m\ncontext_window: 16384\n").context_window).toBe(16_384);
+  });
+
+  it("leaves the window unknown when the config declares none", () => {
+    expect(parseConfig("model: m\n").context_window).toBeUndefined();
+  });
+
+  it.each(["0", "-5", "1.5", "wide"])("refuses a context window of %s", (value) => {
+    expect(() => parseConfig(`model: m\ncontext_window: ${value}\n`)).toThrow(/context_window must be a positive integer/);
   });
 });

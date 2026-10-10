@@ -3,8 +3,10 @@ import { archFor } from "../../arch/registry.js";
 import type { SpendPayload } from "../../contracts/budget.js";
 import { defineTool, type RegisteredTool, type ToolResult } from "../../contracts/tool.js";
 import { budgetOf, unmeteredQuota } from "../../core/budget.js";
+import { sizeOf } from "../../core/context.js";
 import { localDispatch } from "../../core/dispatch.js";
 import type { Harness } from "../../core/loop.js";
+import type { TurnRequest } from "../../core/provider.js";
 import { nullMemory, recalling } from "../../core/memory.js";
 import { registryOf } from "../../core/registry.js";
 import type { Memory } from "../../core/seams.js";
@@ -207,5 +209,52 @@ describe("a later question the request has no room for", () => {
     expect(report.status).toBe("failed");
     expect(report.reason).toMatch(/more than Ask can read at once/);
     expect(seen.flatMap(chatEvents)).toContainEqual({ error: report.reason });
+  });
+});
+
+describe("a config that knows the model's window", () => {
+  const WINDOWED = `
+model: anthropic/claude-opus-5
+context_window: 16384
+budgets: { max_calls: 6, max_wall_ms: 600000, max_cost_usd: 1.00 }
+runtime: { max_turns: 4, result_cap: 8000, recall_limit: 2 }
+tools:
+  - id: findings
+    kind: remote
+    description: search findings
+    parameters: { type: object }
+approvals: []
+`;
+
+  const HEAVY_TURNS: Turn[] = [
+    { role: "user", content: "first question" },
+    { role: "assistant", content: "x".repeat(45_000) },
+    { role: "user", content: "second question" },
+    { role: "assistant", content: "y".repeat(45_000) },
+    { role: "user", content: "third question" },
+  ];
+
+  async function ask(spec: RunSpec): Promise<{ report: ChatReport; request: TurnRequest }> {
+    const harness = harnessOf([{ content: "ok" }]);
+    const stream = runChat(harness, { run_id: RUN, spec, turns: HEAVY_TURNS });
+    for (;;) {
+      const next = await stream.next();
+      if (next.done) return { report: next.value, request: (harness.provider as ScriptedProvider).requests[0]! };
+    }
+  }
+
+  it("folds a heavy history toward the window's ceiling, and only then", async () => {
+    const flat = await ask(specOf());
+    const windowed = await ask(specOf(WINDOWED));
+    const weight = (request: TurnRequest) => sizeOf(request.messages) + JSON.stringify(request.tools).length;
+
+    expect(flat.report.status).toBe("completed");
+    expect(windowed.report.status).toBe("completed");
+    // The flat ceiling leaves 90,000 chars of history alone; the window's does not.
+    expect(flat.request.messages.some((one) => one.content.includes("folded away"))).toBe(false);
+    expect(windowed.request.messages.some((one) => one.content.includes("folded away"))).toBe(true);
+    expect(weight(windowed.request)).toBeLessThan(weight(flat.request));
+    // And the question being answered survives the fold whole.
+    expect(windowed.request.messages.some((one) => one.content.includes("third question"))).toBe(true);
   });
 });

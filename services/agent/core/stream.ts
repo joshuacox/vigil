@@ -18,7 +18,7 @@ import {
   type TurnConfig,
 } from "./loop.js";
 import { ProviderError, type Message, type ToolCall, type ToolSchema, type Turn, type TurnRequest } from "./provider.js";
-import { assemble, prefixOf, type FoldPolicy, type Prefix } from "./context.js";
+import { assemble, DEFAULT_FOLD, derivedCeiling, prefixOf, type FoldPolicy, type Prefix } from "./context.js";
 import { scannerFor, wrap } from "./security.js";
 import type { State } from "./seams.js";
 
@@ -362,7 +362,7 @@ class Run<T, Kinds extends Record<string, unknown>> {
   // Prefix, then the folded history, then a tail that is never persisted. What
   // summarising drops is the fold's to decide, and the edges are never dropped.
   private assembled(working = ""): Message[] {
-    const policy = this.tightened ?? undefined;
+    const policy = this.policy();
     const { messages, folded } = assemble(
       this.prefix,
       this.cfg.task,
@@ -373,6 +373,21 @@ class Run<T, Kinds extends Record<string, unknown>> {
     );
     this.lastFold = folded;
     return messages;
+  }
+
+  // The fold policy for this turn. A known window tightens the fold to the
+  // window-derived ceiling when that is the lower of the two — it can only
+  // ever lower what a request may weigh, so a wide window leaves the turn
+  // exactly as it was and an unknown one is not a policy at all. The tightened
+  // ladder still applies after a failed write-up, capped the same way: its
+  // edges narrow, and the fold it works to never sits above the window's.
+  private policy(): FoldPolicy | undefined {
+    const window = this.cfg.context_window;
+    const base = this.tightened ?? DEFAULT_FOLD;
+    if (window === undefined) return this.tightened ?? undefined;
+    const derived = derivedCeiling(window);
+    if (derived >= base.max_chars) return this.tightened ?? undefined;
+    return { ...base, fold_max_chars: derived };
   }
 
   // One model call, journaled as the provider reports it rather than after it

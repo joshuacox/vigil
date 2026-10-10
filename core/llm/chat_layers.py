@@ -230,6 +230,7 @@ def chat_config(
     mcp_tools: Optional[List[Dict[str, Any]]] = None,
     provider: Optional[str] = None,
     effort: Optional[str] = None,
+    context_window: Optional[int] = None,
 ) -> str:
     """Render the agent layer's config document.
 
@@ -238,11 +239,19 @@ def chat_config(
     the price catalogue is keyed by the bare id, so the agent needs both. Left
     out when unknown, which is what every caller did before this existed.
     ``effort`` is the reasoning effort set on the model, left out when unset.
+    ``context_window`` is the resolved model's window in tokens, rendered only
+    when known (a positive int): the agent layer sizes its fold against it,
+    downwards only. Unknown leaves the key out and the flat ceiling stands.
     """
     document = {
         "model": model,
         **({"provider": provider} if provider else {}),
         **({"effort": effort} if effort else {}),
+        **(
+            {"context_window": context_window}
+            if isinstance(context_window, int) and context_window > 0
+            else {}
+        ),
         "budgets": DEFAULT_BUDGETS,
         "runtime": DEFAULT_RUNTIME,
         "tools": _declare(tools, mcp_tools),

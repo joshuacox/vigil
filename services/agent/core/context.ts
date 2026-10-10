@@ -18,11 +18,31 @@ export interface FoldPolicy {
   // What the whole request may weigh. A count bounds how many turns are carried and
   // says nothing about how heavy one is, so the tail shrinks until the request fits.
   max_chars: number;
+  // A tighter whole-request ceiling the fold alone works to, when a caller knows
+  // one. The refusal in assemble still measures against max_chars: a question is
+  // refused for leaving no room beside the parts the fold cannot touch, and a
+  // tighter fold budget changes how much history is carried toward those parts,
+  // not what fits beside them.
+  fold_max_chars?: number;
 }
 
 // 120k characters is roughly 30k tokens of history, which leaves a long answer room
 // inside any provider's window and inside the gateway's own per-request ceiling.
 export const DEFAULT_FOLD: FoldPolicy = { head: 2, tail: 8, max_messages: 40, max_chars: 120_000 };
+
+// The window a request is sized against is not all spendable: 4,096 of its tokens
+// are held back for the reply the request asks for, and the rest is taken at 2.7
+// chars per token — 3.0 for text that is mostly JSON, which is what a request
+// weighs once results are in it, times 0.9 for the wire body running larger than
+// the character count kept here. Used only to lower the flat ceiling: the policy
+// that carries it takes the smaller of the two, so a wide window changes nothing
+// and a narrow one folds earlier.
+const REPLY_RESERVE_TOKENS = 4_096;
+const WINDOW_CHARS_PER_TOKEN = 2.7;
+
+export function derivedCeiling(windowTokens: number): number {
+  return Math.max(0, Math.floor((windowTokens - REPLY_RESERVE_TOKENS) * WINDOW_CHARS_PER_TOKEN));
+}
 
 export function sizeOf(messages: readonly Message[]): number {
   return messages.reduce((total, message) => total + message.content.length, 0);
@@ -189,6 +209,7 @@ export function assemble(
   if (question !== undefined && question.content.length > room) {
     throw new Error("This case has more than Ask can read at once. Ask about something more specific.");
   }
-  const { messages, folded } = foldHistory(history, summarise, { ...policy, max_chars: room });
+  const foldRoom = Math.max(0, (policy.fold_max_chars ?? policy.max_chars) - spent);
+  const { messages, folded } = foldHistory(history, summarise, { ...policy, max_chars: foldRoom });
   return { messages: [...intro, ...messages, ...tail], folded };
 }

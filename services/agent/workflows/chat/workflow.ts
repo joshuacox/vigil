@@ -93,6 +93,9 @@ function turnFor(options: ChatOptions, lead: RoleSpec): TurnConfig {
     verbs: [],
     result_cap: runtime.result_cap,
     recall_limit: runtime.recall_limit,
+    // The window the config resolved for this conversation's model, when it
+    // knows one: the fold sizes against it only downwards.
+    ...(options.spec.context_window === undefined ? {} : { context_window: options.spec.context_window }),
   };
 }
 

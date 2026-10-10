@@ -112,6 +112,11 @@ export interface Config {
   // Reasoning effort for `model`, from the model assignment's settings. Absent
   // leaves the model's own default.
   effort?: Effort;
+  // The window of `model` in tokens, when the caller knows it: the catalogue
+  // carries it, and the caller that resolved the model is the side that can
+  // say. The fold sizes against it only downwards — it can lower the request
+  // ceiling, never raise it. Absent leaves the ceiling flat.
+  context_window?: number;
   budgets: BudgetLimits;
   runtime: Runtime;
   tools: ToolSpec[];
@@ -164,7 +169,7 @@ const LAYERS = {
     "phases",
     "narrative",
   ],
-  config: ["model", "provider", "effort", "budgets", "runtime", "tools", "approvals", "thresholds"],
+  config: ["model", "provider", "effort", "context_window", "budgets", "runtime", "tools", "approvals", "thresholds"],
 } as const;
 
 export type Layer = keyof typeof LAYERS;
@@ -453,6 +458,11 @@ export function parseConfig(text: string, owned: Owned = NONE): Config {
     throw new SpecError(`effort must be one of ${EFFORTS.join(", ")}`);
   }
 
+  const contextWindow = front["context_window"];
+  if (contextWindow !== undefined && (!Number.isInteger(contextWindow) || (contextWindow as number) <= 0)) {
+    throw new SpecError(`context_window must be a positive integer, got ${String(contextWindow)}`);
+  }
+
   const tools = parseTools(front["tools"]);
   const declared = new Set(tools.map((tool) => tool.id));
   if (declared.size !== tools.length) throw new SpecError("tools declares the same id twice");
@@ -466,6 +476,7 @@ export function parseConfig(text: string, owned: Owned = NONE): Config {
     model,
     ...(provider === undefined ? {} : { provider }),
     ...(effort === undefined ? {} : { effort: effort as Effort }),
+    ...(contextWindow === undefined ? {} : { context_window: contextWindow as number }),
     budgets: positive(merge(front["budgets"], DEFAULT_BUDGETS, "budgets"), "budgets"),
     runtime: positive(merge(front["runtime"], DEFAULT_RUNTIME, "runtime"), "runtime"),
     tools,
